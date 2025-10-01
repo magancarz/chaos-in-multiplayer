@@ -1,0 +1,2 @@
+add_subdirectory(GameNetworkingSockets)
+add_subdirectory(spdlog)
