@@ -22,12 +22,15 @@
 
 #pragma once
 
-#include <functional>
-
-#include "Common/Packet.h"
-#include "Server/ClientConnection.h"
-
 namespace chs::online
 {
-    using PacketCallback = std::function<void(ClientConnection&, const Packet&)>;
+    enum class ConnectionStatus
+    {
+        NONE = 0,
+        CONNECTING,
+        FINDING_ROUTE,
+        CONNECTED,
+        CLOSED_BY_PEER,
+        PROBLEM_DETECTED_LOCALLY
+    };
 } // namespace chs::online

@@ -22,12 +22,17 @@
 
 #pragma once
 
-#include <functional>
+#include <steam/steamnetworkingsockets.h>
+#include <steam/isteamnetworkingutils.h>
 
-#include "Common/Packet.h"
-#include "Server/ClientConnection.h"
+#include "Common/ConnectionStatus.h"
 
 namespace chs::online
 {
-    using PacketCallback = std::function<void(ClientConnection&, const Packet&)>;
+    struct ConnectionStatusChange
+    {
+        HSteamNetConnection connection;
+        ConnectionStatus old_status;
+        ConnectionStatus current_status;
+    };
 } // namespace chs::online

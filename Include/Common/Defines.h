@@ -22,12 +22,10 @@
 
 #pragma once
 
-#include <functional>
-
-#include "Common/Packet.h"
-#include "Server/ClientConnection.h"
+#include <steam/isteamnetworkingutils.h>
 
 namespace chs::online
 {
-    using PacketCallback = std::function<void(ClientConnection&, const Packet&)>;
+    using Connection = HSteamNetConnection;
+    using PollGroup = HSteamNetPollGroup;
 } // namespace chs::online

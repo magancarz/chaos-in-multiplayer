@@ -25,9 +25,13 @@
 #include <functional>
 
 #include "Common/Packet.h"
+#include "Common/ConnectionStatusChange.h"
 #include "Server/ClientConnection.h"
 
 namespace chs::online
 {
+    class Server;
+
+    using ConnectionStatusChangeCallback = std::function<void(Server&, const ConnectionStatusChange&)>;
     using PacketCallback = std::function<void(ClientConnection&, const Packet&)>;
 } // namespace chs::online

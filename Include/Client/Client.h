@@ -29,6 +29,7 @@
 #include <steam/isteamnetworkingutils.h>
 
 #include "Common/Packet.h"
+#include "Common/ConnectionStatus.h"
 #include "Client/Callbacks.h"
 
 namespace chs::online
@@ -57,9 +58,9 @@ namespace chs::online
     private:
         void connectToServer();
 
-        bool is_connected = false;
-        HSteamNetConnection server_connection;
         ISteamNetworkingSockets* networking_interface;
+        HSteamNetConnection server_connection;
+        bool is_connected = false;
 
         void processReceivedPackets();
         void processConnectionStateChanges();

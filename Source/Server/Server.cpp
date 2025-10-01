@@ -55,16 +55,43 @@ namespace chs::online
         stop();
     }
 
-    void Server::sendMessage(HSteamNetConnection connection, const std::string& message)
+    void Server::setConnectionStatusChangeCallback(ConnectionStatusChangeCallback callback)
     {
-        sendDataToConnection(
-            connection,
-            message.data(),
-            message.size(),
+        connection_status_change_callback = std::move(callback);
+    }
+
+    ClientConnection& Server::createClientConnection(Connection connection)
+    {
+        connections.try_emplace(connection, networking_interface, connection);
+        return connections.at(connection);
+    }
+
+    void Server::closeClientConnection(Connection connection)
+    {
+        ClientConnection& client_connection = connections.at(connection);
+        client_connection.close();
+        removeClientConnection(connection);
+    }
+
+    void Server::removeClientConnection(Connection connection)
+    {
+        const ClientConnection& client_connection = connections.at(connection);
+        assert(client_connection.closed() &&
+            "Connection should be closed when erase is called");
+
+        connections.erase(connection);
+    }
+
+    void Server::sendReliablePacket(const Packet& packet, const ClientConnection& client_connection)
+    {
+        sendPacketToClientImpl(
+            client_connection.connection(),
+            packet.data(),
+            packet.size(),
             k_nSteamNetworkingSend_Reliable);
     }
 
-    void Server::sendDataToConnection(
+    void Server::sendPacketToClientImpl(
         HSteamNetConnection connection,
         const void* data,
         uint32_t size,
@@ -80,21 +107,67 @@ namespace chs::online
             OUT_MESSAGE_NUMBER);
     }
 
-    void Server::sendMessageToAllConnectedClients(const std::string& message, HSteamNetConnection except)
+    void Server::sendUnreliablePacket(const Packet& packet, const ClientConnection& client_connection)
     {
-        for (const auto& [connection, client_data] : connections)
+        sendPacketToClientImpl(
+            client_connection.connection(),
+            packet.data(),
+            packet.size(),
+            k_nSteamNetworkingSend_Unreliable);
+    }
+
+    void Server::sendReliablePacketToAllConnectedClients(const Packet& packet)
+    {
+        sendPacketToAllConnectedClientsImpl(packet, k_nSteamNetworkingSend_Reliable);
+    }
+
+    void Server::sendPacketToAllConnectedClientsImpl(
+        const Packet& packet,
+        int send_type,
+        const ClientConnection* except)
+    {
+        for (const auto& [connection, client_connection] : connections)
         {
-            if (connection != except)
+            if (except && except->connection() == connection)
             {
-                sendMessage(connection, message);
+                continue;
+            }
+
+            if (client_connection.connected())
+            {
+                sendPacketToClientImpl(
+                    client_connection.connection(),
+                    packet.data(),
+                    packet.size(),
+                    send_type);
             }
         }
+    }
+
+    void Server::sendUnreliablePacketToAllConnectedClients(const Packet& packet)
+    {
+        sendPacketToAllConnectedClientsImpl(packet, k_nSteamNetworkingSend_Unreliable);
+    }
+
+    void Server::sendReliablePacketToAllConnectedClientsExcept(
+        const Packet& packet,
+        const ClientConnection& except)
+    {
+        sendPacketToAllConnectedClientsImpl(packet, k_nSteamNetworkingSend_Reliable, &except);
+    }
+
+    void Server::sendUnreliablePacketToAllConnectedClientsExcept(
+        const Packet& packet,
+        const ClientConnection& except)
+    {
+        sendPacketToAllConnectedClientsImpl(packet, k_nSteamNetworkingSend_Unreliable, &except);
     }
 
     void Server::start()
     {
         SteamNetworkingIPAddr server_address{};
-        if (!server_address.ParseString((server_ip + ":" + std::to_string(server_port)).c_str()))
+        if (std::string address_as_string = std::format("{}:{}", server_ip, server_port);
+            !server_address.ParseString(address_as_string.c_str()))
         {
             spdlog::error("Invalid server address format");
             running = false;
@@ -184,95 +257,27 @@ namespace chs::online
 
     void Server::onSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* info)
     {
-        switch (info->m_info.m_eState)
+        if (!connection_status_change_callback)
         {
-            case k_ESteamNetworkingConnectionState_None:
-                // NOTE: We will get callbacks here when we destroy connections. You can ignore these.
-                break;
-            case k_ESteamNetworkingConnectionState_ClosedByPeer:
-            case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
-            {
-                if (info->m_eOldState == k_ESteamNetworkingConnectionState_Connected)
-                {
-                    auto connected_client = connections.find(info->m_hConn);
-                    assert(connected_client != connections.end());
-
-                    const char* disconnect_reason;
-                    if (info->m_info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
-                    {
-                        disconnect_reason = "problem detected locally";
-                    }
-                    else
-                    {
-                        disconnect_reason = "closed by peer";
-                    }
-
-                    spdlog::info("Connection {} {}, reason {}: {}",
-                        info->m_info.m_szConnectionDescription,
-                        disconnect_reason,
-                        info->m_info.m_eEndReason,
-                        info->m_info.m_szEndDebug);
-
-                    connected_client->second.close();
-
-                    connections.erase(connected_client);
-
-                    const ClientConnection& client_data = connected_client->second;
-                    std::string disconnect_message = std::format("{} has disconnected.", client_data.alias());
-                    spdlog::info(disconnect_message);
-                    sendMessageToAllConnectedClients(disconnect_message, connected_client->first);
-                }
-                else
-                {
-                    assert(info->m_eOldState == k_ESteamNetworkingConnectionState_Connecting);
-                }
-
-                networking_interface->CloseConnection(info->m_hConn, 0, nullptr, false);
-                break;
-            }
-            case k_ESteamNetworkingConnectionState_Connecting:
-            {
-                assert(connections.find(info->m_hConn) == connections.end());
-
-                spdlog::info("Connection request from {}", info->m_info.m_szConnectionDescription);
-
-                std::string nick = std::format("BraveWarrior{}", 10000 + (rand() % 100000));
-
-                ClientConnection connected_client{networking_interface, info->m_hConn};
-                connected_client.setAlias(nick);
-
-                if (!connected_client.accept())
-                {
-                    connected_client.close();
-                    spdlog::error("Can't accept connection. (It was already closed?)");
-                    break;
-                }
-
-                if (!connected_client.setPollGroup(poll_group))
-                {
-                    connected_client.close();
-                    spdlog::error("Failed to set poll group?");
-                    break;
-                }
-
-                std::string welcome_message = std::format("Hello {}!", nick);
-                sendMessage(info->m_hConn, welcome_message);
-
-                std::string connection_notification = std::format("{} joined the server!", nick);
-                spdlog::info(connection_notification);
-                sendMessageToAllConnectedClients(connection_notification, info->m_hConn); 
-
-                connections.try_emplace(info->m_hConn, std::move(connected_client));
-                break;
-            }
-            case k_ESteamNetworkingConnectionState_Connected:
-                // We will get a callback immediately after accepting the connection.
-                // Since we are the server, we can ignore this, it's not news to us.
-                break;
-            default:
-                // Silences -Wswitch
-                break;
+            spdlog::error("No callback for connection status change");
+            std::exit(1);
         }
+
+        ConnectionStatusChange connection_status_change{};
+        connection_status_change.connection = info->m_hConn;
+        connection_status_change.old_status = CONNECTION_STATUS_MAPPINGS.at(info->m_eOldState);
+        connection_status_change.current_status = CONNECTION_STATUS_MAPPINGS.at(info->m_info.m_eState);
+        connection_status_change_callback(*this, connection_status_change);
+    }
+
+    void Server::ensureClientConnectionExists(HSteamNetConnection client_connection)
+    {
+        if (connections.contains(client_connection))
+        {
+            return;
+        }
+
+        connections.try_emplace(client_connection, networking_interface, client_connection);
     }
 
     void Server::processUserInput()
