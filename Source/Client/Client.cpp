@@ -31,6 +31,16 @@
 
 namespace chs::online
 {
+    void Client::setPacketCallback(PacketCallback callback)
+    {
+        packet_callback = std::move(callback);
+    }
+
+    void Client::setConnectionStatusChangeCallback(ConnectionStatusChangeCallback callback)
+    {
+        connection_status_change_callback = std::move(callback);
+    }
+
     bool Client::initializeConnection(const std::string& ip, unsigned int port)
     {
 		networking_interface = SteamNetworkingSockets();
@@ -55,7 +65,7 @@ namespace chs::online
         return true;
     }
 
-    void Client::update()
+    void Client::updateConnection()
     {
         processReceivedPackets();
         processConnectionStateChanges();
@@ -91,7 +101,7 @@ namespace chs::online
         if (packet_callback)
         {
             Packet packet{incoming_packet->m_pData, static_cast<std::size_t>(incoming_packet->m_cbSize)};
-            packet_callback(packet);
+            packet_callback(incoming_packet->m_conn, packet);
         }
     }
 
@@ -108,28 +118,17 @@ namespace chs::online
 
     void Client::onSteamNetConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* info)
     {
-        assert(info->m_hConn == server_connection || server_connection == k_HSteamNetConnection_Invalid);
-
-        switch ( info->m_info.m_eState )
+        if (!connection_status_change_callback)
         {
-            case k_ESteamNetworkingConnectionState_None:
-                break;
-            case k_ESteamNetworkingConnectionState_ClosedByPeer:
-            case k_ESteamNetworkingConnectionState_ProblemDetectedLocally:
-            {
-                networking_interface->CloseConnection(info->m_hConn, 0, nullptr, false);
-                server_connection = k_HSteamNetConnection_Invalid;
-                break;
-            }
-            case k_ESteamNetworkingConnectionState_Connecting:
-                break;
-
-            case k_ESteamNetworkingConnectionState_Connected:
-                is_connected = true;
-                break;
-            default:
-                break;
+            spdlog::error("No callback for connection status change");
+            std::exit(1);
         }
+
+        ConnectionStatusChange connection_status_change{};
+        connection_status_change.connection = info->m_hConn;
+        connection_status_change.old_status = CONNECTION_STATUS_MAPPINGS.at(info->m_eOldState);
+        connection_status_change.current_status = CONNECTION_STATUS_MAPPINGS.at(info->m_info.m_eState);
+        connection_status_change_callback(connection_status_change);
     }
 
     void Client::sendDataToServer(
@@ -165,5 +164,21 @@ namespace chs::online
             packet.data(),
             packet.size(),
             k_nSteamNetworkingSend_Unreliable);
+    }
+
+    void Client::closeConnection()
+    {
+        networking_interface->CloseConnection(server_connection, 0, nullptr, false);
+    }
+
+    bool Client::connected() const
+    {
+        SteamNetConnectionInfo_t connection_info{};
+        networking_interface->GetConnectionInfo(
+            server_connection,
+            &connection_info);
+
+        return connection_info.m_eState ==
+            ESteamNetworkingConnectionState::k_ESteamNetworkingConnectionState_Connected;
     }
 } // namespace chs::online

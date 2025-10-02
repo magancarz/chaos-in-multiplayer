@@ -52,7 +52,7 @@ namespace chs::online
             return;
         }
 
-        stop();
+        closeConnection();
     }
 
     void Server::setConnectionStatusChangeCallback(ConnectionStatusChangeCallback callback)
@@ -163,7 +163,7 @@ namespace chs::online
         sendPacketToAllConnectedClientsImpl(packet, k_nSteamNetworkingSend_Unreliable, &except);
     }
 
-    void Server::start()
+    void Server::openConnection()
     {
         SteamNetworkingIPAddr server_address{};
         if (std::string address_as_string = std::format("{}:{}", server_ip, server_port);
@@ -194,7 +194,7 @@ namespace chs::online
         spdlog::info("Server listening on port {}", server_port);
     }
 
-    void Server::update()
+    void Server::updateConnection()
     {
         if (quit_requested || !running)
         {
@@ -239,9 +239,8 @@ namespace chs::online
     void Server::processPendingPacket(ISteamNetworkingMessage* pending_packet)
     {
         assert(connections.contains(pending_packet->m_conn));
-        ClientConnection& client_connection = connections.at(pending_packet->m_conn);
         Packet packet{pending_packet->m_pData, static_cast<std::size_t>(pending_packet->m_cbSize)};
-        packet_callback(client_connection, packet);
+        packet_callback(pending_packet->m_conn, packet);
     }
 
     void Server::processConnectionStateChanges()
@@ -267,7 +266,7 @@ namespace chs::online
         connection_status_change.connection = info->m_hConn;
         connection_status_change.old_status = CONNECTION_STATUS_MAPPINGS.at(info->m_eOldState);
         connection_status_change.current_status = CONNECTION_STATUS_MAPPINGS.at(info->m_info.m_eState);
-        connection_status_change_callback(*this, connection_status_change);
+        connection_status_change_callback(connection_status_change);
     }
 
     void Server::ensureClientConnectionExists(HSteamNetConnection client_connection)
@@ -296,7 +295,7 @@ namespace chs::online
         }
     }
 
-    void Server::stop()
+    void Server::closeConnection()
     {
         quit_requested = true;
         running = false;

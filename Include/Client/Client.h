@@ -30,7 +30,7 @@
 
 #include "Common/Packet.h"
 #include "Common/ConnectionStatus.h"
-#include "Client/Callbacks.h"
+#include "Common/Callbacks.h"
 
 namespace chs::online
 {
@@ -45,22 +45,36 @@ namespace chs::online
         Client& operator=(Client&&) noexcept = delete;
 
         void setMaxProcessedPackets(int value) { max_processed_packets = value; }
-        void setPacketCallback(PacketCallback callback) { callback = std::move(packet_callback); }
+        void setPacketCallback(PacketCallback callback);
+        void setConnectionStatusChangeCallback(ConnectionStatusChangeCallback callback);
 
         bool initializeConnection(const std::string& ip, unsigned int port);
-        void update();
+
+        void updateConnection();
 
         void sendReliablePacketToServer(const Packet& packet);
         void sendUnreliablePacketToServer(const Packet& packet);
 
-        [[nodiscard]] bool connected() const { return is_connected; }
-    
+        void closeConnection();
+
+        [[nodiscard]] bool connected() const;
+
     private:
+        inline static const std::unordered_map<
+            ESteamNetworkingConnectionState,
+            ConnectionStatus> CONNECTION_STATUS_MAPPINGS
+        {
+            {k_ESteamNetworkingConnectionState_None, ConnectionStatus::NONE},
+            {k_ESteamNetworkingConnectionState_ClosedByPeer, ConnectionStatus::CLOSED_BY_PEER},
+            {k_ESteamNetworkingConnectionState_ProblemDetectedLocally, ConnectionStatus::PROBLEM_DETECTED_LOCALLY},
+            {k_ESteamNetworkingConnectionState_Connecting, ConnectionStatus::CONNECTING},
+            {k_ESteamNetworkingConnectionState_Connected, ConnectionStatus::CONNECTED}
+        };
+
         void connectToServer();
 
         ISteamNetworkingSockets* networking_interface;
         HSteamNetConnection server_connection;
-        bool is_connected = false;
 
         void processReceivedPackets();
         void processConnectionStateChanges();
@@ -71,8 +85,9 @@ namespace chs::online
         
         void processPendingPacket(ISteamNetworkingMessage* incoming_packet);
 
-        int max_processed_packets = 1;
+        int max_processed_packets = 5;
         PacketCallback packet_callback;
+        ConnectionStatusChangeCallback connection_status_change_callback;
 
         void sendDataToServer(
             const void* data,

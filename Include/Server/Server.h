@@ -33,7 +33,6 @@
 #include "Common/Callbacks.h"
 #include "Common/Defines.h"
 #include "Server/ClientConnection.h"
-#include "Server/Callbacks.h"
 
 namespace chs::online
 {
@@ -58,8 +57,9 @@ namespace chs::online
         void setPacketCallback(PacketCallback callback) { packet_callback = std::move(callback); }
         void setConnectionStatusChangeCallback(ConnectionStatusChangeCallback callback);
 
-        void start();
-        void update();
+        void openConnection();
+
+        void updateConnection();
 
         ClientConnection& createClientConnection(Connection connection);
         void closeClientConnection(Connection connection);
@@ -72,7 +72,7 @@ namespace chs::online
         void sendReliablePacketToAllConnectedClientsExcept(const Packet& packet, const ClientConnection& except);
         void sendUnreliablePacketToAllConnectedClientsExcept(const Packet& packet, const ClientConnection& except);
 
-        void stop();
+        void closeConnection();
 
         [[nodiscard]] bool connectionExists(Connection connection) const { return connections.contains(connection); }
         [[nodiscard]] const ClientConnection& clientConnection(Connection connection) const { return connections.at(connection); }

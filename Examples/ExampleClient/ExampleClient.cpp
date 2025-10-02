@@ -28,17 +28,42 @@
 #include "Common/NetworkingUtils.h"
 #include "Client/Client.h"
 
+void connectionStatusChangeCallback(
+    chs::online::Client& client,
+    const chs::online::ConnectionStatusChange& connection_status_change)
+{
+    switch (connection_status_change.current_status)
+    {
+        case chs::online::ConnectionStatus::CLOSED_BY_PEER:
+        case chs::online::ConnectionStatus::PROBLEM_DETECTED_LOCALLY:
+            client.closeConnection();
+            break;
+        case chs::online::ConnectionStatus::CONNECTING:
+        case chs::online::ConnectionStatus::CONNECTED:
+        default:
+            break;
+    }
+}
+
 int main(int argc, char** argv)
 {
     chs::online::NetworkingUtils::initializeSteamDatagramConnectionSockets();
 
     chs::online::Client client;
 
+    auto connection_status_change_callback =
+        [&client] (const chs::online::ConnectionStatusChange& connection_status_change)
+        {
+            connectionStatusChangeCallback(client, connection_status_change);
+        };
+
+    client.setConnectionStatusChangeCallback(std::move(connection_status_change_callback));
+
     client.initializeConnection("127.0.0.1", 8080);
 
     while (!client.connected())
     {
-        client.update();
+        client.updateConnection();
     }
 
     static constexpr int NUM_OF_MESSAGES = 10;

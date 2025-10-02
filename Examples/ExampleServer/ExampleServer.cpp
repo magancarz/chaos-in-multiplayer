@@ -23,11 +23,11 @@
 #include <spdlog/spdlog.h>
 
 #include "Common/NetworkingUtils.h"
+#include "Common/Callbacks.h"
 #include "Server/Server.h"
-#include "Server/Callbacks.h"
 
 void packetCallback(
-    const chs::online::ClientConnection&,
+    const chs::online::Connection,
     const chs::online::Packet& packet)
 {
     spdlog::info("Received: {}", packet.data());
@@ -109,14 +109,21 @@ int main(int argc, char** argv)
     chs::online::Server server{8080};
 
     server.setPacketCallback(&packetCallback);
-    server.setConnectionStatusChangeCallback(&connectionStatusChangeCallback);
 
-    server.start();
+    auto connection_status_change_callback =
+        [&server] (const chs::online::ConnectionStatusChange& connection_status_change)
+        {
+            connectionStatusChangeCallback(server, connection_status_change);
+        };
+
+    server.setConnectionStatusChangeCallback(std::move(connection_status_change_callback));
+
+    server.openConnection();
     while (!server.quitRequested())
     {
-        server.update();
+        server.updateConnection();
     }
-    server.stop();
+    server.closeConnection();
 
     chs::online::NetworkingUtils::closeSteamDatagramConnectionSockets();
 
